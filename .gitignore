@@ -116,8 +116,9 @@ nul
 # Streamlit
 .streamlit/secrets.toml
 
-# Database (only track schema, not data)
+# Database (track market_data.db for deployment)
 data/*.db
+!data/market_data.db
 data/*.db-journal
 data/*.sqlite
 data/*.sqlite3
