@@ -440,6 +440,7 @@ def fetch_yahoo_data(ticker, lei=None, country=None):
                 roe = eps / bv
                 # Unified COE across all EU banks
                 coe = RF + abs(beta) * ERP
+                data['coe'] = coe
                 
                 # Formula: Price = BV * (ROE - g) / (COE - g)
                 if coe > G:
@@ -447,6 +448,7 @@ def fetch_yahoo_data(ticker, lei=None, country=None):
                     data['intrinsic_value'] = iv
                     data['upside'] = (iv - price) / price if price > 0 else None
                 else:
+                    data['coe'] = coe
                     data['intrinsic_value'] = None
                     data['upside'] = None
         except Exception:
@@ -472,3 +474,301 @@ def get_all_banks():
     except:
         conn.close()
         return pd.DataFrame()
+
+
+# =============================================================================
+# SPRINT 3: RANKING ENHANCEMENTS - PER-YEAR AND CUMULATIVE METRICS
+# =============================================================================
+
+@cache_decorator
+def get_ranking_data_by_year(fy: int):
+    """
+    Get ranking data for a specific fiscal year.
+
+    Args:
+        fy: Fiscal year (e.g., 2024, 2023)
+
+    Returns:
+        DataFrame with per-year metrics from market_financial_years
+    """
+    if not os.path.exists(DB_NAME):
+        return pd.DataFrame()
+
+    conn = sqlite3.connect(DB_NAME)
+
+    query = """
+        SELECT
+            i.lei,
+            i.name,
+            i.ticker,
+            i.country,
+            i.region,
+            i.size_category,
+            f.fy,
+            f.dividend_amt,
+            f.buyback_amt,
+            f.net_income,
+            f.avg_market_cap,
+            f.dividend_yield_fy,
+            f.buyback_yield_fy,
+            f.total_yield_fy,
+            f.eps_fy,
+            f.dps_fy,
+            f.dividend_share_pct,
+            f.buyback_share_pct
+        FROM institutions i
+        JOIN market_financial_years f ON i.lei = f.lei
+        WHERE f.fy = ?
+        ORDER BY i.name
+    """
+
+    try:
+        df = pd.read_sql_query(query, conn, params=(fy,))
+        conn.close()
+        
+        if not df.empty:
+            # Calculate metrics not stored in DB
+            total_payout = df['dividend_amt'].fillna(0) + df['buyback_amt'].fillna(0)
+            
+            df['payout_ratio_fy'] = total_payout / df['net_income']
+            df['dividend_payout_ratio_fy'] = df['dividend_amt'] / df['net_income']
+            df['earnings_yield_fy'] = df['net_income'] / df['avg_market_cap']
+            
+            # Identify columns to mask (where net_income <= 0)
+            mask = df['net_income'] <= 0
+            df.loc[mask, 'payout_ratio_fy'] = None
+            df.loc[mask, 'dividend_payout_ratio_fy'] = None
+            
+        return df
+    except Exception as e:
+        print(f"Error getting ranking data for FY {fy}: {e}")
+        conn.close()
+        return pd.DataFrame()
+
+
+@cache_decorator
+def calculate_cumulative_metrics():
+    """
+    Calculate 5-year cumulative metrics for all banks.
+
+    Returns:
+        DataFrame with:
+            - total_dividends_5y: Sum of dividends (EUR)
+            - total_buybacks_5y: Sum of buybacks (EUR)
+            - total_payout_5y: Combined total (EUR)
+            - avg_dividend_yield_5y: Average annual dividend yield
+            - avg_buyback_yield_5y: Average annual buyback yield
+            - avg_payout_yield_5y: Average annual total yield
+            - avg_payout_ratio_5y: Average annual payout ratio
+            - dividend_cagr_5y: 5-year dividend CAGR
+            - buyback_years: Number of years with buybacks
+            - consistency_score: Buyback consistency (0-1)
+    """
+    if not os.path.exists(DB_NAME):
+        return pd.DataFrame()
+
+    conn = sqlite3.connect(DB_NAME)
+
+    query = """
+        SELECT
+            i.lei,
+            i.name,
+            i.ticker,
+            i.country,
+            i.region,
+            i.size_category,
+            SUM(f.dividend_amt) as total_dividends_5y,
+            SUM(f.buyback_amt) as total_buybacks_5y,
+            SUM(f.dividend_amt + COALESCE(f.buyback_amt, 0)) as total_payout_5y,
+            AVG(f.dividend_yield_fy) as avg_dividend_yield_5y,
+            AVG(f.buyback_yield_fy) as avg_buyback_yield_5y,
+            AVG(f.total_yield_fy) as avg_payout_yield_5y,
+            AVG(f.payout_ratio_fy) as avg_payout_ratio_5y,
+            SUM(CASE WHEN f.buyback_amt > 0 THEN 1 ELSE 0 END) as buyback_years,
+            COUNT(f.fy) as total_years
+        FROM institutions i
+        JOIN market_financial_years f ON i.lei = f.lei
+        WHERE f.fy >= (SELECT MAX(fy) - 4 FROM market_financial_years)
+        GROUP BY i.lei
+        ORDER BY i.name
+    """
+
+    try:
+        df = pd.read_sql_query(query, conn)
+
+        # Calculate consistency score (% of years with buybacks)
+        df['consistency_score'] = df['buyback_years'] / df['total_years']
+
+        # Calculate dividend CAGR
+        df['dividend_cagr_5y'] = df.apply(
+            lambda row: calculate_dividend_cagr_for_lei(conn, row['lei']),
+            axis=1
+        )
+
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"Error calculating cumulative metrics: {e}")
+        conn.close()
+        return pd.DataFrame()
+
+
+def calculate_dividend_cagr_for_lei(conn, lei: str) -> float:
+    """
+    Calculate 5-year dividend CAGR for a specific bank.
+
+    Args:
+        conn: Database connection
+        lei: Legal Entity Identifier
+
+    Returns:
+        CAGR as decimal (e.g., 0.15 = 15% growth)
+    """
+    try:
+        query = """
+            SELECT fy, dps_fy
+            FROM market_financial_years
+            WHERE lei = ?
+            AND fy >= (SELECT MAX(fy) - 4 FROM market_financial_years WHERE lei = ?)
+            ORDER BY fy
+        """
+
+        df = pd.read_sql_query(query, conn, params=(lei, lei))
+
+        if len(df) < 2:
+            return None
+
+        # Get first and last dividend per share
+        first_dps = df.iloc[0]['dps_fy']
+        last_dps = df.iloc[-1]['dps_fy']
+        years = len(df) - 1
+
+        if first_dps is None or last_dps is None or first_dps <= 0:
+            return None
+
+        # CAGR formula: (Ending Value / Beginning Value)^(1/years) - 1
+        cagr = (last_dps / first_dps) ** (1 / years) - 1
+
+        return cagr
+    except Exception as e:
+        return None
+
+
+@cache_decorator
+def calculate_total_shareholder_return(years: int = 5):
+    """
+    Calculate Total Shareholder Return (price appreciation + dividends).
+
+    Args:
+        years: Number of years to look back (1, 3, or 5)
+
+    Returns:
+        DataFrame with TSR metrics
+    """
+    if not os.path.exists(DB_NAME):
+        return pd.DataFrame()
+
+    conn = sqlite3.connect(DB_NAME)
+
+    # Get current prices and historical prices
+    query = f"""
+        SELECT
+            i.lei,
+            i.name,
+            i.ticker,
+            md.current_price,
+            md.market_cap
+        FROM institutions i
+        JOIN market_data md ON i.lei = md.lei
+        WHERE i.ticker IS NOT NULL
+    """
+
+    try:
+        df = pd.read_sql_query(query, conn)
+
+        # Calculate price return for each bank
+        df[f'price_return_{years}y'] = df.apply(
+            lambda row: calculate_price_return(conn, row['lei'], years),
+            axis=1
+        )
+
+        # Get dividend sum for the period
+        df[f'total_dividends_{years}y_eur'] = df.apply(
+            lambda row: get_total_dividends_period(conn, row['lei'], years),
+            axis=1
+        )
+
+        # Calculate dividend return (dividends / initial market cap)
+        df[f'dividend_return_{years}y'] = (
+            df[f'total_dividends_{years}y_eur'] / df['market_cap']
+        )
+
+        # Total Shareholder Return = Price Return + Dividend Return
+        df[f'tsr_{years}y'] = (
+            df[f'price_return_{years}y'].fillna(0) +
+            df[f'dividend_return_{years}y'].fillna(0)
+        )
+
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"Error calculating TSR: {e}")
+        conn.close()
+        return pd.DataFrame()
+
+
+def calculate_price_return(conn, lei: str, years: int) -> float:
+    """Calculate price return over specified period."""
+    try:
+        days = years * 365
+
+        query = """
+            SELECT close
+            FROM market_history
+            WHERE lei = ?
+            AND date <= date('now', '-' || ? || ' days')
+            ORDER BY date DESC
+            LIMIT 1
+        """
+
+        result = conn.execute(query, (lei, days)).fetchone()
+
+        if not result:
+            return None
+
+        historical_price = result[0]
+
+        # Get current price
+        current_query = "SELECT current_price FROM market_data WHERE lei = ?"
+        current_result = conn.execute(current_query, (lei,)).fetchone()
+
+        if not current_result or not historical_price:
+            return None
+
+        current_price = current_result[0]
+
+        # Calculate return
+        price_return = (current_price - historical_price) / historical_price
+
+        return price_return
+    except Exception as e:
+        return None
+
+
+def get_total_dividends_period(conn, lei: str, years: int) -> float:
+    """Get total dividends paid over specified period in EUR."""
+    try:
+        query = """
+            SELECT SUM(amount_eur)
+            FROM dividend_history
+            WHERE lei = ?
+            AND ex_date >= date('now', '-' || ? || ' years')
+        """
+
+        result = conn.execute(query, (lei, years)).fetchone()
+
+        if result and result[0]:
+            return result[0]
+        return 0.0
+    except Exception as e:
+        return 0.0
