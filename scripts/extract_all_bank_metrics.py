@@ -67,6 +67,36 @@ def extract_all_metrics():
     # Mark 2025 as TTM
     df['fy_status'] = df['fy'].apply(lambda x: 'TTM' if x == 2025 else 'FY')
     
+    # Generate Analyst Comments
+    def generate_row_comment(row):
+        comments = []
+        if row['fy'] == 2025:
+            comments.append("TTM bridge based on last 4 quarters.")
+        elif row['fy'] == 2021 and row['payout_ratio_fy'] > 1.2:
+            comments.append("Post-pandemic catch-up distribution.")
+        
+        if row['buyback_amt'] > 0:
+            if row['buyback_yield_fy'] > 0.05:
+                comments.append(f"Significant buyback program (+{row['bb_eps_rise_est']:.1%} Est. EPS rise).")
+            else:
+                comments.append("Active share repurchases.")
+        
+        if row['dividend_yield_fy'] > 0.08:
+            comments.append("High-yield cash distribution.")
+        
+        payout = row['payout_ratio_fy']
+        if payout > 0.9:
+            comments.append("Aggressive capital return strategy.")
+        elif payout > 0 and payout < 0.3:
+            comments.append("Conservative payout, retaining capital.")
+            
+        if row['region'] == 'CEE' and row['buyback_amt'] == 0:
+            comments.append("Traditional CEE pure-dividend model.")
+            
+        return " ".join(comments) if comments else "Standard financial performance."
+
+    df['analyst_comment'] = df.apply(generate_row_comment, axis=1)
+
     # Add timestamp
     from datetime import datetime
     df['extraction_timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
