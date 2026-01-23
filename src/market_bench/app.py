@@ -441,6 +441,8 @@ def main():
                         ('dividend_yield_fy', 'Div Yield', 'pct'),
                         ('buyback_yield_fy', 'BB Yield', 'pct'),
                         ('total_yield_fy', 'Total Yield', 'pct'),
+                        ('rote', 'RoTE', 'pct'),
+                        ('p_tbv', 'P/TBV', 'price'),
                     ]
 
                     # Helper for safe formatting

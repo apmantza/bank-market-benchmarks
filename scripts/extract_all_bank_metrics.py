@@ -32,7 +32,10 @@ def extract_all_metrics():
         mfy.total_yield_fy,
         mfy.dividend_share_pct,
         mfy.buyback_share_pct,
-        mfy.shares_outstanding
+        mfy.shares_outstanding,
+        mfy.tangible_book_value,
+        mfy.rote,
+        mfy.p_tbv
     FROM institutions i
     JOIN market_financial_years mfy ON i.lei = mfy.lei
     WHERE mfy.fy BETWEEN 2021 AND 2025
@@ -59,7 +62,8 @@ def extract_all_metrics():
         'ticker', 'short name', 'country', 'region', 'size', 'fy',
         'net_income', 'avg_market_cap', 'dividend_amt', 'buyback_amt',
         'payout_ratio_fy', 'dividend_yield_fy', 'buyback_yield_fy', 'total_yield_fy',
-        'bb_eps_rise_est', 'eps_fy', 'dps_fy', 'dividend_share_pct', 'buyback_share_pct'
+        'bb_eps_rise_est', 'eps_fy', 'dps_fy', 'rote', 'p_tbv',
+        'tangible_book_value', 'dividend_share_pct', 'buyback_share_pct'
     ]
     
     df = df[cols]
@@ -90,6 +94,16 @@ def extract_all_metrics():
         elif payout > 0 and payout < 0.3:
             comments.append("Conservative payout, retaining capital.")
             
+        # 6. Quality/Efficiency context
+        if row['rote'] > 0.15:
+            comments.append(f"Strong profitability (RoTE {row['rote']:.1%}).")
+            
+        if pd.notna(row['p_tbv']):
+            if row['p_tbv'] < 0.8:
+                comments.append(f"Deeply undervalued vs Book (P/TBV {row['p_tbv']:.2f}x).")
+            elif row['p_tbv'] > 1.2:
+                comments.append(f"Trading at a premium (P/TBV {row['p_tbv']:.2f}x).")
+
         if row['region'] == 'CEE' and row['buyback_amt'] == 0:
             comments.append("Traditional CEE pure-dividend model.")
             

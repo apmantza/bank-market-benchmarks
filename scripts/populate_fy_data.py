@@ -149,10 +149,13 @@ def fetch_buybacks_by_fy(ticker: str) -> dict:
         currency = get_currency_for_ticker(ticker)
         fx_rate = get_fx_rate(currency) or 1.0
         
-        # Labels to look for
-        buyback_labels = ['Repurchase Of Capital Stock', 'Common Stock Payments',
-                         'Repurchase Of Common Stock', 'Purchase Of Stock',
-                         'Net Common Stock Issuance']
+        # Labels to look for - prioritize specific repurchase labels
+        buyback_labels = ['Repurchase Of Capital Stock', 'Repurchase Of Common Stock', 'Purchase Of Stock']
+        
+        # Banks where 'Net Common Stock Issuance' is a known reliable proxy for buybacks
+        fallback_tickers = ['UCG.MI', 'INGA.AS', 'ISP.MI', 'SAN.MC']
+        if ticker in fallback_tickers:
+            buyback_labels.append('Net Common Stock Issuance')
         
         result = {}
         
@@ -162,6 +165,7 @@ def fetch_buybacks_by_fy(ticker: str) -> dict:
             for label in buyback_labels:
                 if label in cashflow.index:
                     row = cashflow.loc[label]
+                    found_any = False
                     for date, value in row.items():
                         if pd.notna(value) and value != 0:
                             fy = date.year
@@ -169,7 +173,9 @@ def fetch_buybacks_by_fy(ticker: str) -> dict:
                             amount_eur = abs(float(value)) * fx_rate if value < 0 else 0
                             if amount_eur > 0:
                                 result[fy] = amount_eur
-                    break
+                                found_any = True
+                    if found_any:
+                        break # Only break if we found actual data for this label
         
         # 2. Augment with Quarterly Data (for years missing in annual)
         q_cashflow = stock.quarterly_cashflow
@@ -214,21 +220,52 @@ def fetch_ttm_buybacks(ticker: str) -> float:
         currency = get_currency_for_ticker(ticker)
         fx_rate = get_fx_rate(currency) or 1.0
         
-        buyback_labels = ['Repurchase Of Capital Stock', 'Common Stock Payments',
-                         'Repurchase Of Common Stock', 'Purchase Of Stock',
-                         'Net Common Stock Issuance']
+        buyback_labels = ['Repurchase Of Capital Stock', 'Repurchase Of Common Stock', 'Purchase Of Stock']
+        
+        fallback_tickers = ['UCG.MI', 'INGA.AS', 'ISP.MI', 'SAN.MC']
+        if ticker in fallback_tickers:
+            buyback_labels.append('Net Common Stock Issuance')
                          
         for label in buyback_labels:
             if label in q_cf.index:
                 row = q_cf.loc[label]
                 valid_vals = row.dropna().head(4)
-                if len(valid_vals) > 0:
-                    # Sum negative outflows
-                    ttm_sum = abs(valid_vals[valid_vals < 0].sum())
+                # Filter for actual negative values (outflows)
+                actual_buybacks = valid_vals[valid_vals < 0]
+                if len(actual_buybacks) > 0:
+                    ttm_sum = abs(actual_buybacks.sum())
                     return float(ttm_sum) * fx_rate
         return 0
     except:
         return 0
+
+
+def fetch_tangible_bv_by_fy(ticker: str) -> dict:
+    """Fetch Tangible Book Value from balance sheet."""
+    try:
+        stock = yf.Ticker(ticker)
+        bs = stock.balance_sheet
+        if bs is None or bs.empty:
+            return {}
+            
+        currency = get_currency_for_ticker(ticker)
+        fx_rate = get_fx_rate(currency) or 1.0
+        
+        result = {}
+        if 'Tangible Book Value' in bs.index:
+            row = bs.loc['Tangible Book Value']
+            for date, val in row.items():
+                if pd.notna(val):
+                    result[date.year] = float(val) * fx_rate
+        elif 'Common Stock Equity' in bs.index: # Fallback to Common Equity if TBV missing
+            row = bs.loc['Common Stock Equity']
+            for date, val in row.items():
+                 if pd.notna(val):
+                    result[date.year] = float(val) * fx_rate
+                    
+        return result
+    except:
+        return {}
 
 
 def fetch_shares_by_fy(ticker: str) -> dict:
@@ -487,7 +524,7 @@ def aggregate_dividends_by_fy(lei: str, ticker: str, conn) -> dict:
 
 
 def calculate_fy_metrics(net_income: float, dividends: float, buybacks: float,
-                         avg_market_cap: float, shares: float) -> dict:
+                         avg_market_cap: float, shares: float, tangible_bv: float = 0) -> dict:
     """
     Calculate all derived FY metrics.
     """
@@ -499,6 +536,7 @@ def calculate_fy_metrics(net_income: float, dividends: float, buybacks: float,
         'net_income': net_income,
         'avg_market_cap': avg_market_cap,
         'shares_outstanding': shares,
+        'tangible_book_value': tangible_bv,
     }
     
     # Payout ratios (only if net income is positive)
@@ -532,7 +570,15 @@ def calculate_fy_metrics(net_income: float, dividends: float, buybacks: float,
     else:
         metrics['eps_fy'] = None
         metrics['dps_fy'] = None
-    
+        
+    # Analyst Metrics
+    if tangible_bv and tangible_bv > 0:
+        metrics['p_tbv'] = avg_market_cap / tangible_bv if avg_market_cap > 0 else None
+        metrics['rote'] = net_income / tangible_bv if net_income > 0 else None
+    else:
+        metrics['p_tbv'] = None
+        metrics['rote'] = None
+        
     return metrics
 
 
@@ -548,11 +594,13 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
     buybacks_by_fy = fetch_buybacks_by_fy(ticker)
     avg_market_cap_by_fy = fetch_avg_market_cap_by_fy(ticker, shares_by_fy)  # Pass shares for accuracy
     dividends_by_fy = aggregate_dividends_by_fy(lei, ticker, conn)
+    tbv_by_fy = fetch_tangible_bv_by_fy(ticker)
     
     if verbose:
         print(f"    Net Income FYs: {list(net_income_by_fy.keys())}")
         print(f"    Buybacks FYs: {list(buybacks_by_fy.keys())}")
         print(f"    Dividends FYs: {list(dividends_by_fy.keys())}")
+        print(f"    TBV FYs: {list(tbv_by_fy.keys())}")
     
     # Get all fiscal years we have data for
     all_fys = set()
@@ -575,6 +623,7 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
         buybacks = buybacks_by_fy.get(fy, 0)
         div_data = dividends_by_fy.get(fy, {'total': 0, 'regular': 0, 'special': 0, 'dps': 0})
         dividends = div_data['total']
+        tbv = tbv_by_fy.get(fy, 0)
         
         # --- TTM HYBRID LOGIC FOR CURRENT YEAR (2025) ---
         if fy == 2025 and net_income == 0:
@@ -593,6 +642,23 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
                 dividends = ttm_div['total']
                 div_data['dps'] = ttm_div['dps']
                 if verbose: print(f"    FY 2025: Using TTM Dividends: €{dividends/1e9:.2f}B")
+            
+            # Fetch TTM TBV from info
+            if tbv == 0:
+                try:
+                    stock = yf.Ticker(ticker)
+                    info = stock.info
+                    # Use 'bookValue' * shares as approx TBV if literal TBV not available
+                    # Actually check balance sheet's last row first
+                    if tbv_by_fy:
+                        latest_year = max(tbv_by_fy.keys())
+                        tbv = tbv_by_fy[latest_year]
+                    elif 'bookValue' in info:
+                        currency = get_currency_for_ticker(ticker)
+                        fx_rate = get_fx_rate(currency) or 1.0
+                        shares_now = info.get('sharesOutstanding', 0)
+                        tbv = info['bookValue'] * shares_now * fx_rate
+                except: pass
 
         shares = shares_by_fy.get(fy, shares_by_fy.get(max(shares_by_fy.keys()), 0) if shares_by_fy else 0)
         avg_mkt_cap = avg_market_cap_by_fy.get(fy, 0)
@@ -605,7 +671,7 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
             except: pass
         
         # Calculate metrics
-        metrics = calculate_fy_metrics(net_income, dividends, buybacks, avg_mkt_cap, shares)
+        metrics = calculate_fy_metrics(net_income, dividends, buybacks, avg_mkt_cap, shares, tbv)
         
         # Delete existing record for this LEI+FY, then insert
         conn.execute("DELETE FROM market_financial_years WHERE lei = ? AND fy = ?", (lei, fy))
@@ -614,15 +680,16 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
             INSERT INTO market_financial_years 
             (lei, ticker, fy, net_income, dividend_amt, buyback_amt, avg_market_cap,
              shares_outstanding, dividend_yield_fy, buyback_yield_fy, total_yield_fy,
-             dividend_share_pct, buyback_share_pct, eps_fy, dps_fy)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             dividend_share_pct, buyback_share_pct, eps_fy, dps_fy, tangible_book_value, rote, p_tbv)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             lei, ticker, fy,
             metrics['net_income'], metrics['dividend_amt'], metrics['buyback_amt'],
             metrics['avg_market_cap'], metrics['shares_outstanding'],
             metrics['dividend_yield_fy'], metrics['buyback_yield_fy'], metrics['total_yield_fy'],
             metrics['dividend_share_pct'], metrics['buyback_share_pct'],
-            metrics['eps_fy'], metrics['dps_fy']
+            metrics['eps_fy'], metrics['dps_fy'],
+            metrics['tangible_book_value'], metrics['rote'], metrics['p_tbv']
         ))
         
         records_updated += 1
