@@ -35,7 +35,9 @@ def extract_all_metrics():
         mfy.shares_outstanding,
         mfy.tangible_book_value,
         mfy.rote,
-        mfy.p_tbv
+        mfy.p_tbv,
+        mfy.price_perf_fy,
+        mfy.total_return_fy
     FROM institutions i
     JOIN market_financial_years mfy ON i.lei = mfy.lei
     WHERE mfy.fy BETWEEN 2021 AND 2025
@@ -57,13 +59,21 @@ def extract_all_metrics():
     
     df['bb_eps_rise_est'] = df['buyback_yield_fy'].apply(calc_accretion)
     
+    # Calculate Percentiles per year
+    print("Calculating peer group percentiles per year...")
+    for year in df['fy'].unique():
+        year_mask = df['fy'] == year
+        for metric in ['total_yield_fy', 'rote', 'p_tbv', 'total_return_fy']:
+            df.loc[year_mask, f'{metric}_pctile'] = df.loc[year_mask, metric].rank(pct=True) * 100
+    
     # Reorder columns for logical flow
     cols = [
         'ticker', 'short name', 'country', 'region', 'size', 'fy',
         'net_income', 'avg_market_cap', 'dividend_amt', 'buyback_amt',
         'payout_ratio_fy', 'dividend_yield_fy', 'buyback_yield_fy', 'total_yield_fy',
-        'bb_eps_rise_est', 'eps_fy', 'dps_fy', 'rote', 'p_tbv',
-        'tangible_book_value', 'dividend_share_pct', 'buyback_share_pct'
+        'total_yield_fy_pctile', 'bb_eps_rise_est', 'eps_fy', 'dps_fy', 'rote', 
+        'rote_pctile', 'p_tbv', 'p_tbv_pctile', 'price_perf_fy', 'total_return_fy', 
+        'total_return_fy_pctile', 'tangible_book_value', 'dividend_share_pct', 'buyback_share_pct'
     ]
     
     df = df[cols]
@@ -106,6 +116,12 @@ def extract_all_metrics():
 
         if row['region'] == 'CEE' and row['buyback_amt'] == 0:
             comments.append("Traditional CEE pure-dividend model.")
+            
+        # 7. Performance context
+        if row['total_return_fy_pctile'] > 80:
+            comments.append(f"Top-tier market performance ({row['total_return_fy']:.1%} TSR).")
+        elif row['total_return_fy_pctile'] < 20:
+            comments.append("Underperforming vs peers.")
             
         return " ".join(comments) if comments else "Standard financial performance."
 

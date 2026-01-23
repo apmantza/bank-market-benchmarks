@@ -443,6 +443,7 @@ def main():
                         ('total_yield_fy', 'Total Yield', 'pct'),
                         ('rote', 'RoTE', 'pct'),
                         ('p_tbv', 'P/TBV', 'price'),
+                        ('total_return_fy', 'TSR', 'pct'),
                     ]
 
                     # Helper for safe formatting

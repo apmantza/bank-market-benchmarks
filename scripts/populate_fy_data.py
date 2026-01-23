@@ -268,6 +268,53 @@ def fetch_tangible_bv_by_fy(ticker: str) -> dict:
         return {}
 
 
+def fetch_prices_by_fy(ticker: str) -> dict:
+    """Fetch start/end prices for each fiscal year."""
+    try:
+        stock = yf.Ticker(ticker)
+        # Fetch data back to 2020 to get 2021 start
+        hist = stock.history(start="2020-01-01")
+        if hist.empty:
+            return {}
+            
+        currency = get_currency_for_ticker(ticker)
+        fx_rate = get_fx_rate(currency) or 1.0
+        # If GBp, convert to GBP by dividing by 100
+        if currency == 'GBp':
+            fx_rate /= 100.0
+            
+        result = {}
+        years = sorted(hist.index.year.unique())
+        
+        for year in years:
+            if year < 2021: continue
+            
+            # Start price: Close of last day of previous year
+            prev_year_data = hist[hist.index.year == year - 1]
+            if not prev_year_data.empty:
+                p_start = prev_year_data.iloc[-1]['Close']
+            else:
+                # Fallback to first day of current year
+                year_data = hist[hist.index.year == year]
+                p_start = year_data.iloc[0]['Close'] if not year_data.empty else 0
+                
+            # End price: Close of last day of current year
+            year_data = hist[hist.index.year == year]
+            if not year_data.empty:
+                p_end = year_data.iloc[-1]['Close']
+            else:
+                p_end = 0
+            
+            if p_start > 0 and p_end > 0:
+                result[year] = {
+                    'start': float(p_start) * fx_rate,
+                    'end': float(p_end) * fx_rate
+                }
+        return result
+    except:
+        return {}
+
+
 def fetch_shares_by_fy(ticker: str) -> dict:
     """
     Fetch historical shares outstanding by fiscal year from balance sheet.
@@ -524,7 +571,8 @@ def aggregate_dividends_by_fy(lei: str, ticker: str, conn) -> dict:
 
 
 def calculate_fy_metrics(net_income: float, dividends: float, buybacks: float,
-                         avg_market_cap: float, shares: float, tangible_bv: float = 0) -> dict:
+                         avg_market_cap: float, shares: float, tangible_bv: float = 0,
+                         price_start: float = 0, price_end: float = 0) -> dict:
     """
     Calculate all derived FY metrics.
     """
@@ -537,6 +585,8 @@ def calculate_fy_metrics(net_income: float, dividends: float, buybacks: float,
         'avg_market_cap': avg_market_cap,
         'shares_outstanding': shares,
         'tangible_book_value': tangible_bv,
+        'price_start': price_start,
+        'price_end': price_end
     }
     
     # Payout ratios (only if net income is positive)
@@ -579,6 +629,15 @@ def calculate_fy_metrics(net_income: float, dividends: float, buybacks: float,
         metrics['p_tbv'] = None
         metrics['rote'] = None
         
+    # Price Performance
+    if price_start and price_start > 0 and price_end and price_end > 0:
+        metrics['price_perf_fy'] = (price_end / price_start) - 1
+        dps = metrics['dps_fy'] or 0
+        metrics['total_return_fy'] = (price_end + dps - price_start) / price_start
+    else:
+        metrics['price_perf_fy'] = None
+        metrics['total_return_fy'] = None
+        
     return metrics
 
 
@@ -595,12 +654,14 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
     avg_market_cap_by_fy = fetch_avg_market_cap_by_fy(ticker, shares_by_fy)  # Pass shares for accuracy
     dividends_by_fy = aggregate_dividends_by_fy(lei, ticker, conn)
     tbv_by_fy = fetch_tangible_bv_by_fy(ticker)
+    prices_by_fy = fetch_prices_by_fy(ticker)
     
     if verbose:
         print(f"    Net Income FYs: {list(net_income_by_fy.keys())}")
         print(f"    Buybacks FYs: {list(buybacks_by_fy.keys())}")
         print(f"    Dividends FYs: {list(dividends_by_fy.keys())}")
         print(f"    TBV FYs: {list(tbv_by_fy.keys())}")
+        print(f"    Price Data FYs: {list(prices_by_fy.keys())}")
     
     # Get all fiscal years we have data for
     all_fys = set()
@@ -660,6 +721,7 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
                         tbv = info['bookValue'] * shares_now * fx_rate
                 except: pass
 
+        price_data = prices_by_fy.get(fy, {'start': 0, 'end': 0})
         shares = shares_by_fy.get(fy, shares_by_fy.get(max(shares_by_fy.keys()), 0) if shares_by_fy else 0)
         avg_mkt_cap = avg_market_cap_by_fy.get(fy, 0)
         
@@ -671,7 +733,8 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
             except: pass
         
         # Calculate metrics
-        metrics = calculate_fy_metrics(net_income, dividends, buybacks, avg_mkt_cap, shares, tbv)
+        metrics = calculate_fy_metrics(net_income, dividends, buybacks, avg_mkt_cap, shares, tbv, 
+                                       price_data['start'], price_data['end'])
         
         # Delete existing record for this LEI+FY, then insert
         conn.execute("DELETE FROM market_financial_years WHERE lei = ? AND fy = ?", (lei, fy))
@@ -680,8 +743,9 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
             INSERT INTO market_financial_years 
             (lei, ticker, fy, net_income, dividend_amt, buyback_amt, avg_market_cap,
              shares_outstanding, dividend_yield_fy, buyback_yield_fy, total_yield_fy,
-             dividend_share_pct, buyback_share_pct, eps_fy, dps_fy, tangible_book_value, rote, p_tbv)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             dividend_share_pct, buyback_share_pct, eps_fy, dps_fy, tangible_book_value, rote, p_tbv,
+             price_start, price_end, price_perf_fy, total_return_fy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             lei, ticker, fy,
             metrics['net_income'], metrics['dividend_amt'], metrics['buyback_amt'],
@@ -689,7 +753,8 @@ def populate_fy_data_for_bank(lei: str, ticker: str, name: str, conn, verbose: b
             metrics['dividend_yield_fy'], metrics['buyback_yield_fy'], metrics['total_yield_fy'],
             metrics['dividend_share_pct'], metrics['buyback_share_pct'],
             metrics['eps_fy'], metrics['dps_fy'],
-            metrics['tangible_book_value'], metrics['rote'], metrics['p_tbv']
+            metrics['tangible_book_value'], metrics['rote'], metrics['p_tbv'],
+            metrics['price_start'], metrics['price_end'], metrics['price_perf_fy'], metrics['total_return_fy']
         ))
         
         records_updated += 1
