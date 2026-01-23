@@ -67,6 +67,10 @@ def extract_all_metrics():
     # Mark 2025 as TTM
     df['fy_status'] = df['fy'].apply(lambda x: 'TTM' if x == 2025 else 'FY')
     
+    # Add timestamp
+    from datetime import datetime
+    df['extraction_timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
     # Save to CSV
     os.makedirs('reports', exist_ok=True)
     df.to_csv(OUTPUT_PATH, index=False)
