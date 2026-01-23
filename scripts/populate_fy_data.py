@@ -96,15 +96,25 @@ def fetch_net_income_by_fy(ticker: str) -> dict:
 
 
 def fetch_ttm_net_income(ticker: str) -> float:
-    """Fetch Trailing Twelve Month net income from quarterly financials."""
+    """Fetch Trailing Twelve Month net income."""
     try:
         stock = yf.Ticker(ticker)
-        q_financials = stock.quarterly_financials
         
+        # 1. Try info dict for reliable TTM
+        info = stock.info
+        ttm_ni = info.get('netIncomeToCommon') or info.get('netIncome')
+        if ttm_ni and ttm_ni > 0:
+            # Info financials are usually in ticker's local currency, but let's assume same as financials
+            # Need to verify if yf.info is ALWAYS in local currency like financials
+            currency = get_currency_for_ticker(ticker)
+            fx_rate = get_fx_rate(currency) or 1.0
+            return float(ttm_ni) * fx_rate
+            
+        # 2. Fallback to quarterly financials sum
+        q_financials = stock.quarterly_financials
         if q_financials is None or q_financials.empty:
             return 0
             
-        # Get currency and FX rate
         currency = get_currency_for_ticker(ticker)
         fx_rate = get_fx_rate(currency) or 1.0
         
