@@ -2,28 +2,28 @@
 
 ## 🌍 Regional Strategy Mapping
 - **CEE**: Avg Total Yield **8.2%**. A **Traditionalist** region sticking primarily to cash dividends, favored by local retail investor bases.
-- **Northern Europe**: Avg Total Yield **10.0%**. A **Modernist** region utilizing aggressive buybacks to manage high CET1 ratios and trade at a premium.
-- **Southern Europe**: Avg Total Yield **8.0%**. A **Traditionalist** region sticking primarily to cash dividends, favored by local retail investor bases.
-- **Western Europe**: Avg Total Yield **8.4%**. A **Traditionalist** region sticking primarily to cash dividends, favored by local retail investor bases.
+- **Northern Europe**: Avg Total Yield **10.6%**. A **Modernist** region utilizing aggressive buybacks to manage high CET1 ratios and trade at a premium.
+- **Southern Europe**: Avg Total Yield **8.7%**. A **Traditionalist** region sticking primarily to cash dividends, favored by local retail investor bases.
+- **Western Europe**: Avg Total Yield **9.7%**. A **Modernist** region utilizing aggressive buybacks to manage high CET1 ratios and trade at a premium.
 
 ## 📏 The Size Correlation
-- **Huge (>500bn) Banks**: Yield 9.3%. Focused on stable, predictable dividend flows to signal balance sheet strength.
-- **Large (200-500bn) Banks**: Yield 9.7%. Focused on stable, predictable dividend flows to signal balance sheet strength.
-- **Medium (50-200bn) Banks**: Yield 7.3%. Focused on stable, predictable dividend flows to signal balance sheet strength.
-- **Small (<50bn) Banks**: Yield 9.3%. Focused on stable, predictable dividend flows to signal balance sheet strength.
+- **Huge (>500bn) Banks**: Yield 11.9%. These Tier-1 players are the core drivers of the **Buyback Pivot**, returning over 30% of capital via shares.
+- **Large (200-500bn) Banks**: Yield 9.9%. Focused on stable, predictable dividend flows to signal balance sheet strength.
+- **Medium (50-200bn) Banks**: Yield 7.6%. Focused on stable, predictable dividend flows to signal balance sheet strength.
+- **Small (<50bn) Banks**: Yield 9.6%. Focused on stable, predictable dividend flows to signal balance sheet strength.
 
 ## 🔄 The 'Buyback Pivot' Leaders
 Banks that have fundamentally shifted their strategy toward share repurchases:
 
 | Bank | Country | BB Share | Avg Total Yield | Comment |
 |------|---------|----------|-----------------|---------|
-| Jyske | DK | 86.6% | 11.1% | Buyback-first return model |
-| Piraeus | GR | 58.3% | 4.6% | Buyback-first return model |
-| UBS | CH | 58.1% | 6.4% | Buyback-first return model |
+| Jyske | DK | 79.1% | 11.9% | Buyback-first return model |
+| Société générale | FR | 69.5% | 18.1% | Buyback-first return model |
+| UBS | CH | 61.6% | 8.0% | Buyback-first return model |
+| UNICREDIT | IT | 57.3% | 18.7% | Buyback-first return model |
 | DEUTSCHE BANK | DE | 53.2% | 6.5% | Buyback-first return model |
 | Santander | ES | 50.4% | 8.7% | Buyback-first return model |
 | AIB | IE | 49.4% | 8.1% | Buyback-first return model |
-| Arion | IS | 48.3% | 13.4% | Buyback-first return model |
 | BoC | CY | 45.7% | 8.2% | Buyback-first return model |
 
 ## 🎯 Analyst Insights & Patterns

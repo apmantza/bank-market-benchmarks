@@ -141,7 +141,8 @@ def fetch_buybacks_by_fy(ticker: str) -> dict:
         
         # Labels to look for
         buyback_labels = ['Repurchase Of Capital Stock', 'Common Stock Payments',
-                         'Repurchase Of Common Stock', 'Purchase Of Stock']
+                         'Repurchase Of Common Stock', 'Purchase Of Stock',
+                         'Net Common Stock Issuance']
         
         result = {}
         
@@ -204,7 +205,8 @@ def fetch_ttm_buybacks(ticker: str) -> float:
         fx_rate = get_fx_rate(currency) or 1.0
         
         buyback_labels = ['Repurchase Of Capital Stock', 'Common Stock Payments',
-                         'Repurchase Of Common Stock', 'Purchase Of Stock']
+                         'Repurchase Of Common Stock', 'Purchase Of Stock',
+                         'Net Common Stock Issuance']
                          
         for label in buyback_labels:
             if label in q_cf.index:

@@ -4,7 +4,7 @@ import numpy as np
 import os
 
 DB_PATH = 'data/market_data.db'
-OUTPUT_PATH = 'reports/all_banks_financial_metrics_2021_2025.csv'
+OUTPUT_PATH = 'reports/all_banks_financial_metrics_2021_2025_v2.csv'
 
 def extract_all_metrics():
     if not os.path.exists(DB_PATH):
